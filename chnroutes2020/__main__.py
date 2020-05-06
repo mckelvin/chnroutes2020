@@ -4,6 +4,7 @@ import os
 import sys
 import json
 import math
+import socket
 import logging
 import tempfile
 import ipaddress
@@ -33,6 +34,7 @@ class ChnRoutes2020:
 
     def __init__(self):
         self.work_dir = os.path.join(tempfile.gettempdir(), "chnroutes2020")
+        logger.debug("Work dir: %s", self.work_dir)
         if not os.path.exists(self.work_dir):
             os.makedirs(self.work_dir)
 
@@ -101,6 +103,11 @@ class ChnRoutes2020:
         }
 
     def _yield_cn_ipv4_records(self):
+        if not os.path.exists(self.cached_file):
+            raise RuntimeError(
+                f"{self.cached_file} not found. Please download the file "
+                f"by running the generate command first."
+            )
         with open(self.cached_file, "r") as fhandler:
             for line in fhandler:
                 ip_range_dct = self._process_line(line)
@@ -141,40 +148,77 @@ class ChnRoutes2020:
 
         raise RuntimeError("Gateway not found")
 
-    def find_record_by_ip(self, target_ip):
+    def find_record_by_ip(self, hostname_or_ip):
+        target_ip = ipaddress.IPv4Address(socket.gethostbyname(hostname_or_ip))
         for ip_range_dct in self._yield_cn_ipv4_records():
             starting_ip = ipaddress.IPv4Address(ip_range_dct["starting_ip"])
             ip_mask = ipaddress.IPv4Address(ip_range_dct["ip_mask"])
-            target_ip = ipaddress.IPv4Address(target_ip)
             if int(target_ip) & int(ip_mask) == int(starting_ip):
-                return ip_range_dct
+                return str(target_ip), ip_range_dct
         return None
 
 
-@click.command()
-@click.option("-t", "--target",
-              help='Any of %s' % " ".join(ChnRoutes2020.TMPL_DICT.keys()))
-@click.option("-c", "--check",
-              help='Check if the target ip is listed')
-def cli(target, check):
-    logging.basicConfig(level=logging.INFO)
-    app = ChnRoutes2020()
-    if check is not None:
-        rst = app.find_record_by_ip(check)
-        if rst is None:
-            logger.info("Record not found for %s", check)
-        else:
-            logger.info(
-                "Record found for %s in %s/%s",
-                check,
-                rst["starting_ip"],
-                rst["num_mask"],
-            )
+@click.group()
+@click.option("--debug/--no-debug", default=False,
+              help='Enable debug log')
+@click.pass_context
+def cli(ctx, debug):
+    if debug:
+        log_level = logging.DEBUG
     else:
-        if target is not None and "teardown" not in target:
-            logger.debug("Use existing file for teardown")
-            app.download_delegated_apnic_file()
-        app.generate(target)
+        log_level = logging.INFO
+
+    logging.basicConfig(level=log_level)
+    ctx.ensure_object(dict)
+    ctx.obj["app"] = ChnRoutes2020()
+
+
+@cli.command("check")
+@click.pass_context
+@click.argument('hostname', nargs=1)
+def check_ip(ctx, hostname):
+    """
+    Check if a hostname or an IPv4 address is in the local list.
+    """
+    app = ctx.obj["app"]
+    rst = app.find_record_by_ip(hostname)
+    if rst is None:
+        logger.info("Record not found for %s", hostname)
+    else:
+        target_ip, ip_range_dct = rst
+        if target_ip != hostname:
+            hostname_str = f"{hostname}({target_ip})"
+        else:
+            hostname_str = hostname
+        logger.info(
+            "Record found for %s in %s/%s",
+            hostname_str,
+            ip_range_dct["starting_ip"],
+            ip_range_dct["num_mask"],
+        )
+
+
+@cli.command("generate")
+@click.pass_context
+@click.argument('target', nargs=1)
+def generate_rules(ctx, target):
+    """
+    Generate route command for target.
+    Target is any of
+    surge,
+    macos_setup, macos_teardown,
+    windows_setup, windows_teardown,
+    default
+    """
+    app = ctx.obj["app"]
+    if target is not None and "teardown" not in target:
+        app.download_delegated_apnic_file()
+    else:
+        logger.debug(
+            "This is a 'teardown' target, "
+            "I'm not going to download the file."
+        )
+    app.generate(target)
 
 
 if __name__ == "__main__":
