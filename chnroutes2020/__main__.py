@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 
 import os
+import re
 import sys
 import json
 import math
@@ -31,6 +32,7 @@ class ChnRoutes2020:
         "windows_teardown": "route delete {starting_ip}",
         "default": "{starting_ip}/{num_mask}",
     }
+    RE_DEFAULT_GW = re.compile("default +(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}) .*(en\d+)")
 
     def __init__(self):
         self.work_dir = os.path.join(tempfile.gettempdir(), "chnroutes2020")
@@ -134,17 +136,14 @@ class ChnRoutes2020:
         option_dict = {}
         for line in lines:
             line = line.decode("utf-8")
-            if not line.startswith("default"):
+            rst = self.RE_DEFAULT_GW.findall(line)
+            if not rst:
                 continue
-
-            cols = line.split()
-            gw_ip = cols[1]
-            gw_name = cols[3]
+            gw_ip, gw_name = rst[0]
             option_dict[gw_name] = gw_ip
 
-        for gw_name in ["en4", "en0"]:
-            if gw_name in option_dict:
-                return option_dict[gw_name]
+        if option_dict:
+            return option_dict[max(option_dict)]
 
         raise RuntimeError("Gateway not found")
 
