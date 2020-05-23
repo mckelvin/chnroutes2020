@@ -7,7 +7,7 @@ import json
 import math
 import socket
 import logging
-import tempfile
+import pathlib
 import ipaddress
 import subprocess
 
@@ -35,7 +35,7 @@ class ChnRoutes2020:
     RE_DEFAULT_GW = re.compile("default +(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}) .*(en\d+)")
 
     def __init__(self):
-        self.work_dir = os.path.join(tempfile.gettempdir(), "chnroutes2020")
+        self.work_dir = os.path.join(str(pathlib.Path.home()), ".chnroutes2020")
         logger.debug("Work dir: %s", self.work_dir)
         if not os.path.exists(self.work_dir):
             os.makedirs(self.work_dir)
